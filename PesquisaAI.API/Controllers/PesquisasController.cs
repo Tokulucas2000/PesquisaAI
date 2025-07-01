@@ -6,6 +6,9 @@ using System.Text;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Net.Http.Json;
+using Newtonsoft.Json.Linq;
+using Newtonsoft.Json;
 namespace PesquisaAI.API.Controllers
 {
     [Route("api/[controller]")]
@@ -19,10 +22,8 @@ namespace PesquisaAI.API.Controllers
             _httpClient = httpClient;
         }
         [HttpPost]
-        public async Task<IActionResult> Upload(IFormFile file, [FromForm] string format, [FromForm] string gptToken, [FromForm] string gptModel)
+        public async Task<IActionResult> Upload(IFormFile file, [FromForm] string format, [FromForm] string gptToken, [FromForm] string gptModel, [FromForm] string description)
         {
-            //format pode receber valores como text, json ou html
-            var prompt = $"Baseado no json gere um relatório no formato de {(format == "html" ? "html com apenas o conteúdo dentro do <body>, sem a tag <body> e <html>" : format)} com o titulo sendo Relatório do arquivo {Path.GetFileNameWithoutExtension(file.FileName)}, {(format == "html" ? "gere apenas o conteúdo que estaria dentro da tag <body>, sem incluir a tag <body> ou <html>. Use apenas <h1>, <h2>, <ul>, <li> etc. Siga esse modelo: Título no <h1>Tópicos em <h2><strong>...</strong></h2>Lista com contagem: <li>Valor (X)</li>Ignore campos com valores vazios" : "tendo como exemplo o tópico Idade que faz referencia ao campo idade, contendo uma bullet list com a idade e a quantidade de vezes que se repete, aplicar esse modelo para todos os campos que possuem mais de valores em comum, os demais devem apenas gerar o topico com uma list dos resultados. Sem valores vazios." )} {(format != "json" ? "todos os tópicos em negrito " : " ")}";
             var listRecords = new List<PesquisaCsvRecord>();
             using (var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8))
             {
@@ -42,9 +43,33 @@ namespace PesquisaAI.API.Controllers
                 }
             }
             var listConvertida = await ConvertListToStructuredString(listRecords);
-            prompt += listConvertida.Replace("\r\n", " "); 
+
+            var prompt = $"Faça como um profissional refine e faça a seguinte solicitação referente ao arquivo {Path.GetFileName(file.FileName)}: \n {description}";
+            if (format == "text")
+            {
+                prompt += "\nO resumo deve estar no formato de texto com os titulos em destaque negrito.";
+            }
+            else if (format == "json")
+            {
+                prompt += "\nO resumo deve estar no formato de JSON, incluir o nome do arquivo como na chave arquivo, tendo os titulos como chaves, o formato gerado deve ser livre de caracteres que nao pertencem ao JSON";
+            }
+            else
+            {
+                prompt += "O resumo deve estar no formato de hmtl simples,Considere apenas a estrutura interna do <body>, ou seja, não inclua a tag <body> em si, Use somente as seguintes tags para a estrutura: <h1>, <h2>, <h3>, <h4>, <ul>, <li>, <strong>, <p>, e quebras de linha se necessário. Segue um modelo: \n Titulo na Tag<h1> \n Topicos no strong <h2><strong>...</strong></h2> e subitens em listas não ordenadas <ul><li>...</li></ul>";
+            }
+            prompt += "\nSem comentarios apenas a analise feita";
+            prompt += "\nRetire valores vazios ou nulos";
+            if(format != "json") prompt += "\nAjuste gramaticalmente os titulos";
+            prompt += $"\nSegue os dados no formato de JSON gerado a partir de um CSV: \n {listConvertida}";
             var result = await GenerateAIResult(prompt, gptToken, gptModel);
-            result = result.Replace("```", "").Replace("´´´", "");
+            result = result.Replace("```", "").Replace("´´´", "").Replace("html", "");
+
+            if(format == "json")
+            {
+                var jsonObj = JObject.Parse(result);
+                result = jsonObj.ToString(Formatting.Indented);
+            }
+
             return Ok(result);
         }
 
@@ -61,13 +86,13 @@ namespace PesquisaAI.API.Controllers
                 foreach (var record in records)
                 {
                     sb.Append($"Idade = '{record.Idade}', " +
-                              $"PrincipalFuncao = '{record.PrincipalFuncao}', " +
-                              $"NivelExperiencia = '{record.NivelExperiencia}', " +
-                              $"ExperienciaAtual = '{record.ExperienciaAtual}', " +
-                              $"ExperienciaAtual2 = '{record.ExperienciaAtual2}', " +
-                              $"MotivacaoInscricao = '{record.MotivacaoInscricao}', " +
-                              $"OQuePerguntaria = '{record.OQuePerguntaria}', " +
-                              $"TopicosInteresse = '{record.TopicosInteresse}', ");
+                              $"PrincipalFuncao = '{record.PrincipalFuncao.Replace("\r\n"," ")}', " +
+                              $"NivelExperiencia = '{record.NivelExperiencia.Replace("\r\n", " ")}', " +
+                              $"ExperienciaAtual = '{record.ExperienciaAtual.Replace("\r\n", " ")}', " +
+                              $"ExperienciaAtual2 = '{record.ExperienciaAtual2.Replace("\r\n", " ")}', " +
+                              $"MotivacaoInscricao = '{record.MotivacaoInscricao.Replace("\r\n", " ")}', " +
+                              $"OQuePerguntaria = '{record.OQuePerguntaria.Replace("\r\n", " ")}', " +
+                              $"TopicosInteresse = '{record.TopicosInteresse.Replace("\r\n", " ")}', ");
                 }
 
                 // Remove a vírgula e espaço extra do último registro
@@ -89,7 +114,7 @@ namespace PesquisaAI.API.Controllers
                 input = prompt
             };
 
-            var json = JsonSerializer.Serialize(payload);
+            var json = System.Text.Json.JsonSerializer.Serialize(payload);
 
             requestMessage.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
