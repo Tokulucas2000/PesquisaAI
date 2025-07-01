@@ -62,13 +62,7 @@ namespace PesquisaAI.API.Controllers
             if(format != "json") prompt += "\nAjuste gramaticalmente os titulos";
             prompt += $"\nSegue os dados no formato de JSON gerado a partir de um CSV: \n {listConvertida}";
             var result = await GenerateAIResult(prompt, gptToken, gptModel);
-            result = result.Replace("```", "").Replace("´´´", "").Replace("html", "");
-
-            if(format == "json")
-            {
-                var jsonObj = JObject.Parse(result);
-                result = jsonObj.ToString(Formatting.Indented);
-            }
+            result = result.Replace("```", "").Replace("´´´", "").Replace("html", "").Replace("\r\n", " ").Replace("\r", " ");
 
             return Ok(result);
         }
